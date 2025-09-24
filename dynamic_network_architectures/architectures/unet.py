@@ -92,6 +92,10 @@ class ResidualEncoderUNet(nn.Module):
                  nonlin_kwargs: dict = None,
                  deep_supervision: bool = False,
                  block: Union[Type[BasicBlockD], Type[BottleneckD]] = BasicBlockD,
+                 global_enhancing: bool = False,
+                 global_enhancing_depth: int = 1,
+                 global_enhancing_maxpool: bool = False,
+                 global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
                  bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
                  stem_channels: int = None
                  ):
@@ -110,6 +114,9 @@ class ResidualEncoderUNet(nn.Module):
         self.encoder = ResidualEncoder(input_channels, n_stages, features_per_stage, conv_op, kernel_sizes, strides,
                                        n_blocks_per_stage, conv_bias, norm_op, norm_op_kwargs, dropout_op,
                                        dropout_op_kwargs, nonlin, nonlin_kwargs, block, bottleneck_channels,
+                                       global_enhancing=global_enhancing, global_enhancing_depth=global_enhancing_depth,
+                                       global_enhancing_maxpool=global_enhancing_maxpool,
+                                       global_enhancing_gate=global_enhancing_gate,
                                        return_skips=True, disable_default_stem=False, stem_channels=stem_channels)
         self.decoder = UNetDecoder(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision)
 

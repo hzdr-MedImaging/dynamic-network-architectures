@@ -34,7 +34,11 @@ class ResidualEncoder(nn.Module):
                  pool_type: str = 'conv',
                  stochastic_depth_p: float = 0.0,
                  squeeze_excitation: bool = False,
-                 squeeze_excitation_reduction_ratio: float = 1. / 16
+                 squeeze_excitation_reduction_ratio: float = 1. / 16,
+                 global_enhancing: bool = False,
+                 global_enhancing_depth: int = 1,
+                 global_enhancing_maxpool: bool = False,
+                 global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
                  ):
         """
 
@@ -107,7 +111,10 @@ class ResidualEncoder(nn.Module):
                 conv_bias, norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs,
                 block=block, bottleneck_channels=bottleneck_channels[s], stochastic_depth_p=stochastic_depth_p,
                 squeeze_excitation=squeeze_excitation,
-                squeeze_excitation_reduction_ratio=squeeze_excitation_reduction_ratio
+                squeeze_excitation_reduction_ratio=squeeze_excitation_reduction_ratio,
+                global_enhancing=global_enhancing, global_enhancing_depth=global_enhancing_depth,
+                global_enhancing_maxpool=global_enhancing_maxpool,
+                global_enhancing_gate=global_enhancing_gate
             )
 
             if pool_op is not None:

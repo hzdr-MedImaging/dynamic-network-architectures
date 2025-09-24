@@ -7,6 +7,9 @@ from torch.nn.modules.dropout import _DropoutNd
 from dynamic_network_architectures.building_blocks.helper import maybe_convert_scalar_to_list, get_matching_pool_op
 from dynamic_network_architectures.building_blocks.simple_conv_blocks import ConvDropoutNormReLU
 from dynamic_network_architectures.building_blocks.regularization import DropPath, SqueezeExcite
+from dynamic_network_architectures.building_blocks.global_enhancer import GlobalEnhancer
+
+
 import numpy as np
 
 
@@ -27,6 +30,10 @@ class BasicBlockD(nn.Module):
                  stochastic_depth_p: float = 0.0,
                  squeeze_excitation: bool = False,
                  squeeze_excitation_reduction_ratio: float = 1. / 16,
+                 global_enhancing: bool = False,
+                 global_enhancing_depth: int = 1,
+                 global_enhancing_maxpool: bool = False,
+                 global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
                  # todo wideresnet?
                  ):
         """
@@ -84,6 +91,12 @@ class BasicBlockD(nn.Module):
             self.squeeze_excitation = SqueezeExcite(self.output_channels, conv_op,
                                                     rd_ratio=squeeze_excitation_reduction_ratio, rd_divisor=8)
 
+        # Global Enhancer
+        self.apply_ge = global_enhancing
+        if self.apply_ge:
+            self.global_enhancer = GlobalEnhancer(self.output_channels, conv_op, depth=global_enhancing_depth,
+                                                  add_maxpool=global_enhancing_maxpool, gate_layer=global_enhancing_gate)
+
         has_stride = (isinstance(stride, int) and stride != 1) or any([i != 1 for i in stride])
         requires_projection = (input_channels != output_channels)
 
@@ -106,6 +119,8 @@ class BasicBlockD(nn.Module):
         out = self.conv2(self.conv1(x))
         if self.apply_stochastic_depth:
             out = self.drop_path(out)
+        if self.apply_ge:
+            out = self.global_enhancer(out)
         if self.apply_se:
             out = self.squeeze_excitation(out)
         out += residual
@@ -276,7 +291,11 @@ class StackedResidualBlocks(nn.Module):
                  bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
                  stochastic_depth_p: float = 0.0,
                  squeeze_excitation: bool = False,
-                 squeeze_excitation_reduction_ratio: float = 1. / 16
+                 squeeze_excitation_reduction_ratio: float = 1. / 16,
+                 global_enhancing: bool = False,
+                 global_enhancing_depth: int = 1,
+                 global_enhancing_maxpool: bool = False,
+                 global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
                  ):
         """
         Stack multiple instances of block.
@@ -318,10 +337,13 @@ class StackedResidualBlocks(nn.Module):
             blocks = nn.Sequential(
                 block(conv_op, input_channels, output_channels[0], kernel_size, initial_stride, conv_bias,
                       norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs, stochastic_depth_p,
-                      squeeze_excitation, squeeze_excitation_reduction_ratio),
+                      squeeze_excitation, squeeze_excitation_reduction_ratio, global_enhancing, global_enhancing_depth,
+                      global_enhancing_maxpool, global_enhancing_gate),
                 *[block(conv_op, output_channels[n - 1], output_channels[n], kernel_size, 1, conv_bias, norm_op,
                         norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs, stochastic_depth_p,
-                        squeeze_excitation, squeeze_excitation_reduction_ratio) for n in range(1, n_blocks)]
+                        squeeze_excitation, squeeze_excitation_reduction_ratio, global_enhancing,
+                        global_enhancing_depth, global_enhancing_maxpool,
+                        global_enhancing_gate) for n in range(1, n_blocks)]
             )
         else:
             blocks = nn.Sequential(
