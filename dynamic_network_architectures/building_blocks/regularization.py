@@ -64,10 +64,10 @@ class SqueezeExcite(nn.Module):
         self.gate = gate_layer()
 
     def forward(self, x):
-        x_se = x.mean((2, 3), keepdim=True)
+        x_se = x.mean([*range(2,x.ndim)], keepdim=True) # collapse spatial dimensions
         if self.add_maxpool:
             # experimental codepath, may remove or change
-            x_se = 0.5 * x_se + 0.5 * x.amax((2, 3), keepdim=True)
+            x_se = 0.5 * x_se + 0.5 * x.amax([*range(2,x.ndim)], keepdim=True)
         x_se = self.fc1(x_se)
         x_se = self.act(self.bn(x_se))
         x_se = self.fc2(x_se)
