@@ -129,12 +129,12 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
         nonlin_kwargs: dict = None,
         deep_supervision: bool = False,
         block: Union[Type[BasicBlockD], Type[BottleneckD]] = BasicBlockD,
-        global_enhancing: bool = False,
-        global_enhancing_depth: int = 1,
-        global_enhancing_maxpool: bool = False,
-        global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
-        bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
-        stem_channels: int = None,
+            global_enhancing: bool = False,
+            global_enhancing_depth: int = 1,
+            global_enhancing_maxpool: bool = False,
+            global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
+            bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
+            stem_channels: int = None,
     ):
         super().__init__()
 
