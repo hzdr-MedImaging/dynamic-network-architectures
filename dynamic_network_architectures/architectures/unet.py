@@ -129,12 +129,12 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
         nonlin_kwargs: dict = None,
         deep_supervision: bool = False,
         block: PerStageResidualBlockType = BasicBlockD,
-            global_enhancing: bool = False,
-            global_enhancing_depth: int = 1,
-            global_enhancing_maxpool: bool = False,
-            global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
-            bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
-            stem_channels: int = None,
+        global_enhancing: bool = False,
+        global_enhancing_depth: int = 1,
+        global_enhancing_maxpool: bool = False,
+        global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
+        bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
+        stem_channels: int = None,
     ):
         super().__init__()
 
@@ -182,10 +182,32 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
             stem_channels=stem_channels,
         )
         self.decoder = UNetDecoder(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision)
+        self.skip_weights = None
+        self.grad_blocks = None
 
     def forward(self, x):
         skips = self.encoder(x)
+        if self.skip_weights is not None:
+            skips = [w * s for w, s in zip(self.skip_weights, skips)] # just multiply skips by weights
+        if self.grad_blocks is not None:
+            skips = [s if not b else s.detach() for s, b in zip(skips, self.grad_blocks)]
         return self.decoder(skips)
+
+    def set_skip_weights(self, weights):
+        assert len(weights) == len(self.encoder.output_channels)
+        print("SWs: ", [f"{w:.3f}" for w in weights])
+        device = next(self.encoder.parameters()).device
+        weights = torch.as_tensor(weights.copy())
+
+        if self.skip_weights is None:
+            self.skip_weights = weights.to(device)
+        else:
+            self.skip_weights.copy_(weights)
+
+    def set_grad_blocks(self, blocks):
+        assert len(blocks) == len(self.encoder.output_channels)
+        print("Blocks: ", blocks)
+        self.grad_blocks = blocks
 
     def compute_conv_feature_map_size(self, input_size):
         assert len(input_size) == convert_conv_op_to_dim(self.encoder.conv_op), (
