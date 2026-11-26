@@ -1,4 +1,4 @@
-from typing import Literal, Tuple
+from typing import Literal, Tuple, List
 import torch
 from torch import nn
 from dynamic_network_architectures.building_blocks.helper import convert_dim_to_conv_op
@@ -111,6 +111,88 @@ class PatchDecode(nn.Module):
         """
         return self.decode(x)
 
+class PatchDecodeWithSkips(nn.Module):
+    def __init__(
+        self,
+        patch_size,
+        embed_dim: int,
+        out_channels: int,
+        skip_channels: Tuple[int, ...],
+        ch_per_level=None,
+        norm=LayerNormNd,
+        activation=nn.GELU,
+        skip_mode = "add", # "add" or "concat"
+    ):
+        """
+        patch size must be 2^x, so 2, 4, 8, 16, 32, etc. Otherwise we die
+        """
+        super().__init__()
+
+        def _round_to_8(inp):
+            return int(max(8, np.round((inp + 1e-6) / 8) * 8))
+
+        num_stages = int(np.log(max(patch_size)) / np.log(2))
+        num_skips = min(len(skip_channels), num_stages)
+        strides = [[2 if (p / 2**n) % 2 == 0 else 1 for p in patch_size] for n in range(num_stages)][::-1]
+        dim_red = (embed_dim / (2 * out_channels)) ** (1 / num_stages)
+
+        if ch_per_level is not None:
+            assert len(ch_per_level) == num_stages
+
+        self.skip_mode = skip_mode
+        self.num_skips = num_skips
+
+        # don't question me
+        channels = [embed_dim] + [_round_to_8(embed_dim / dim_red ** (x + 1)) for x in range(num_stages)]
+        channels[-1] = out_channels
+
+        self.stages_alone = nn.ModuleList()
+        for s in range(num_stages - num_skips):
+            self.stages_alone.append(
+                nn.Sequential(
+                    nn.ConvTranspose3d(channels[s], channels[s + 1], kernel_size=strides[s], stride=strides[s]),
+                    norm(channels[s + 1]),
+                    activation(),
+                )
+            )
+
+        self.stages_merged = nn.ModuleList()
+        for s in range(num_skips - 1):
+            self.stages_merged.append(
+                nn.Sequential(
+                    nn.ConvTranspose3d(channels[s], channels[s + 1], kernel_size=strides[s], stride=strides[s]),
+                    norm(channels[s + 1]),
+                    activation(),
+                )
+            )
+        self.stages_merged.append(nn.ConvTranspose3d(channels[-2], channels[-1], kernel_size=strides[-1], stride=strides[-1]))
+
+        if skip_mode == "add":
+            self.projectors = nn.ModuleList()
+            for s in range(num_skips):
+                self.projectors.append(nn.Conv3d(skip_channels[s], channels[num_stages - s], kernel_size=[1,1,1], stride=[1,1,1]))
+
+    def forward(self, x: torch.Tensor, skips: List[torch.Tensor]) -> torch.Tensor:
+        """
+        Expects list of inputs of shape (B, embed_dim, px, py, pz)! This will require you to reshape the output of your transformer!
+        """
+        # print("Input:", x.shape)
+        # print("Skips")
+        # for skip in skips:
+        #     print(skip.shape)
+
+        for stage in self.stages_alone:
+            x = stage(x)
+
+        # skips go from hi-rez to low-rez and stages from low- to hi-rez
+        # we also throw away unused skips (it can be that the last one is not needed)
+        if self.skip_mode == "add":
+            for skip, prj, stage in zip(reversed(skips[:self.num_skips]), reversed(self.projectors), self.stages_merged):
+                x = stage(x) + prj(skip)
+        else:
+            for skip, prj, stage in zip(reversed(skips[:self.num_skips]), reversed(self.projectors), self.stages_merged):
+                x = stage(x) + prj(skip)
+        return x
 
 class PatchEmbed_deeper(nn.Module):
     """ResNet-style patch embedding with progressive downsampling"""
@@ -289,6 +371,7 @@ class PatchEmbedDeeperControlled(nn.Module):
         """
         super().__init__()
         self.add_skips = add_skips
+        self.ch_per_level = ch_per_level
         norm_op = nn.InstanceNorm3d
         nonlin = nonlin
         norm_op_kwargs = {"eps": 1e-5, "affine": True}
@@ -375,7 +458,7 @@ class PatchEmbedDeeperControlled(nn.Module):
             )
         # ------------------------ END CONTRIBUTION BY STUDENT ----------------------- #
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         # Stem
         x = self.stem(x)
         # Add_skips idea of Luc.bouteille@uk-essen.de
@@ -397,3 +480,33 @@ class PatchEmbedDeeperControlled(nn.Module):
             x = x + p
 
         return x
+
+class PatchEmbedDeeperControlledWithSkips(PatchEmbedDeeperControlled):
+    def forward(self, x: torch.Tensor):
+        ret = []
+        # Stem
+        x = self.stem(x)
+        # keep skips to pass to decoder
+        ret.append(x)
+        # Add_skips idea of Luc.bouteille@uk-essen.de
+        if self.add_skips:
+            p = self.scale_proj_to_tokens[0] * self.proj_to_tokens[0](x)
+
+        # Progressive encoding through residual stages
+        for i, stage in enumerate(self.stages):
+            x = stage(x)
+            ret.append(x)
+            # Do skip projection to token grid
+            if self.add_skips and i < len(self.stages) - 1:
+                j = i + 1
+                p = p + self.scale_proj_to_tokens[j] * self.proj_to_tokens[j](x)
+
+        # Final projection to embedding tokens
+        x = self.final_proj(x)
+        # Add skip projections
+        if self.add_skips:
+            x = x + p
+
+        return x, ret
+
+

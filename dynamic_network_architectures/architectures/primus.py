@@ -40,6 +40,11 @@ _PRIMUS_CONFIGS = {
         "eva_numheads": 16,
         "embed_dim": 1056,
     },
+    "NS": {
+        "eva_depth": 0,
+        "eva_numheads": 1,
+        "embed_dim": 396,
+    },
 }
 
 
