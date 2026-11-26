@@ -16,6 +16,7 @@ from dynamic_network_architectures.initialization.weight_init import init_last_b
 from torch import nn
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.dropout import _DropoutNd
+from torchvision.ops import StochasticDepth
 
 
 class PlainConvUNet(AbstractDynamicNetworkArchitectures):
@@ -127,6 +128,8 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
         dropout_op_kwargs: dict = None,
         nonlin: Union[None, Type[torch.nn.Module]] = None,
         nonlin_kwargs: dict = None,
+        skip_dropout_op: Union[None, Type[StochasticDepth]] = None,
+        skip_dropout_probs: dict = None,
         deep_supervision: bool = False,
         block: PerStageResidualBlockType = BasicBlockD,
         global_enhancing: bool = False,
@@ -134,7 +137,7 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
         global_enhancing_maxpool: bool = False,
         global_enhancing_gate: Union[None, Type[torch.nn.Module]] = None,
         bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
-        stem_channels: int = None,
+        stem_channels: int = None
     ):
         super().__init__()
 
@@ -182,6 +185,13 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
             stem_channels=stem_channels,
         )
         self.decoder = UNetDecoder(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision)
+        if skip_dropout_op is None:
+            self.skip_dropout_ops = [nn.Identity() for _ in range(n_stages)]
+        else:
+            if isinstance(skip_dropout_probs, (float,int)):
+                skip_dropout_probs = [skip_dropout_probs] * n_stages
+            assert len(skip_dropout_probs) == n_stages, ("skip_dropout_probs must have as many entries as number of stages in UNet")
+            self.skip_dropout_ops = [skip_dropout_op(p=prob, mode="row") for prob in skip_dropout_probs]
         self.skip_weights = None
         self.grad_blocks = None
 
@@ -191,6 +201,7 @@ class ResidualEncoderUNet(AbstractDynamicNetworkArchitectures):
             skips = [w * s for w, s in zip(self.skip_weights, skips)] # just multiply skips by weights
         if self.grad_blocks is not None:
             skips = [s if not b else s.detach() for s, b in zip(skips, self.grad_blocks)]
+        skips = [dropout_op(skip) for skip, dropout_op in zip(skips, self.skip_dropout_ops)]
         return self.decoder(skips)
 
     def set_skip_weights(self, weights):
